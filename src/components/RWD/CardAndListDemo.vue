@@ -51,6 +51,12 @@
               <v-list-item-icon><v-icon>mdi-cog</v-icon></v-list-item-icon>
               <v-list-item-content><v-list-item-title>buttonDemo</v-list-item-title></v-list-item-content>
             </v-list-item>
+
+            <v-list-item to="/list/wafer-map">
+              <v-list-item-icon><v-icon>mdi-cog</v-icon></v-list-item-icon>
+              <v-list-item-content><v-list-item-title>WaferMap</v-list-item-title></v-list-item-content>
+            </v-list-item>
+
           </v-list>
         </v-card>
       </v-col>

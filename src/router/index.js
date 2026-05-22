@@ -2,11 +2,15 @@ import Vue from 'vue'
 import VueRouter from 'vue-router'
 import HomeView from '../views/HomeView.vue'
 import AboutView from '../views/AboutView.vue'
+import WaferMap from '../views/wafer-map/WaferMap.vue'
+
 import KitchenManager from '../components/Order/KitchenManager.vue'
 import ShoppingCart from '../components/ShoppingCart.vue'
 import Product from '../product/Product.vue'
+
 import CardAndListDemo from '../components/RWD/CardAndListDemo.vue'
 import ButtonDemoView from '../components/RWD/ButtonDemoView.vue'
+
 import BasicForm from '../components/form/BasicForm.vue'
 import SimpleTable from '../components/form/SimpleTable.vue'
 import SimpleDialog from '../components/form/SimpleDialog.vue'
@@ -24,16 +28,6 @@ const routes = [
     name: 'home',
     component: HomeView
   },
-  // {
-  //   path: '/order',
-  //   name: 'order',
-  //   component: KitchenManager
-  // },
-  // {
-  //   path: '/shopping',
-  //   name: 'shopping',
-  //   component: ShoppingCart
-  // },
   {
     path: '/product',
     name: 'product',
@@ -88,6 +82,10 @@ const routes = [
       {
         path: '/list/button-demo',
         component: ButtonDemoView 
+      },
+      {
+        path: '/list/wafer-map',
+        component: WaferMap 
       }
     ]
   },
