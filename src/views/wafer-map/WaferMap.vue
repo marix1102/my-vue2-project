@@ -44,49 +44,7 @@
           ></v-checkbox>
 
           <v-divider class="my-4"></v-divider>
-
-          <div v-if="roiStats" class="blue-grey lighten-5 pa-3 rounded mb-4" style="border: 1px dashed #607D8B">
-            <div class="subtitle-2 font-weight-bold d-flex justify-space-between align-center text--primary">
-              <span>🔍 區域選定統計 (ROI)</span>
-              <v-btn icon small @click="clearROI"><v-icon small>mdi-close</v-icon></v-btn>
-            </div>
-            <v-list dense class="background-transparent pa-0 mt-1" style="background: transparent;">
-              <v-list-item class="px-0">
-                <v-list-item-content>區域內總數:</v-list-item-content>
-                <v-list-item-content class="align-end font-weight-bold">
-                  {{ roiStats.total }}
-                </v-list-item-content>
-              </v-list-item>
-              <v-list-item class="px-0">
-                <v-list-item-content>區域內合格 (Pass):</v-list-item-content>
-                <v-list-item-content class="align-end font-weight-bold green--text">
-                  {{ roiStats.pass }}
-                </v-list-item-content>
-              </v-list-item>
-              <v-list-item class="px-0">
-                <v-list-item-content>區域內不合格 (Fail):</v-list-item-content>
-                <v-list-item-content class="align-end font-weight-bold red--text">
-                  {{ roiStats.fail }}
-                </v-list-item-content>
-              </v-list-item>
-              <v-list-item class="px-0">
-                <v-list-item-content>區域良率 (ROI Yield):</v-list-item-content>
-                <v-list-item-content class="align-end font-weight-bold blue--text">
-                  {{ roiStats.yield }} %
-                </v-list-item-content>
-              </v-list-item>
-            </v-list>
-            <v-progress-linear
-              :value="Number(roiStats.yield)"
-              color="green"
-              background-color="red"
-              height="6"
-              rounded
-              class="mt-1"
-            ></v-progress-linear>
-          </div>
-
-          <v-subheader class="pl-0 font-weight-bold">全片數據統計 (Summary)</v-subheader>
+          <v-subheader class="pl-0 font-weight-bold">數據統計 (Summary)</v-subheader>
 
           <v-list dense class="pa-0">
             <v-list-item class="px-0">
@@ -139,10 +97,9 @@
         >
           <canvas
             ref="waferCanvas"
-            @mousedown="handleMouseDown"
             @mousemove="handleMouseMove"
             @mouseleave="handleMouseLeave"
-            style="border: 1px solid #ccc; background-color: #fafafa; cursor: crosshair;"
+            style="border: 1px solid #ccc; background-color: #fafafa"
           ></canvas>
         </v-card>
       </v-col>
@@ -158,26 +115,17 @@ export default {
       hoveredDie: null,
       totalDies: 0,
       selectedBins: [1, 2], 
-
       passCount: 0,
       failCount: 0,
-
-      // 晶圓參數設定
       waferRadiusInDies: 30, 
-      padding: 20,
-
-      // 🔥 新增：ROI 狀態機
-      isDragging: false,      // 是否正在拖曳框選中
-      dragStart: null,        // 拖曳起點像素座標 {x, y}
-      dragCurrent: null,      // 拖曳當前像素座標 {x, y}
-      roiBounds: null,        // 框選完成後的邏輯範圍（四象限索引範圍）
-      roiStats: null,         // ROI 良率統計結果
+      padding: 20, 
     };
   },
   watch: {
+    // 當過濾條件變更時，必須重新繪製離屏快取背景，再刷新主畫面
     selectedBins() {
+      this.updateOffscreenCache();
       this.drawWafer();
-      if (this.roiBounds) this.calculateROIOptimized(); // 篩選條件變更時同步重算 ROI
     },
   },
   computed: {
@@ -191,26 +139,29 @@ export default {
     },
   },
   created() {
+    // 非回應式變數避免 Vue 精準監聽耗損效能
     this.rawWaferData = [];
     this.canvasSize = 500;
     this.dieWidth = 0;
     this.dieHeight = 0;
+
+    // 初始化記憶體中的離屏畫布與隱藏 Context 
+    this.offscreenCanvas = document.createElement("canvas");
+    this.offscreenCtx = this.offscreenCanvas.getContext("2d");
   },
   mounted() {
     this.generateWaferMap();
     this.resizeCanvas();
     window.addEventListener("resize", this.resizeCanvas);
-    // 💡 在 window 級別監聽 mouseup，確保工程師滑鼠拖出 Canvas 外放開時，依然能正確收尾事件鏈
-    window.addEventListener("mouseup", this.handleMouseUp);
   },
   beforeDestroy() {
     window.removeEventListener("resize", this.resizeCanvas);
-    window.removeEventListener("mouseup", this.handleMouseUp);
   },
   methods: {
     generateWaferMap() {
       const data = [];
       const R = this.waferRadiusInDies;
+      
       let pCount = 0;
       let fCount = 0;
 
@@ -219,6 +170,7 @@ export default {
           if (this.isDieFullyInsideWafer(x, y, R)) {
             const bin = Math.random() > 0.12 ? 1 : 2;
             data.push({ x, y, bin });
+
             if (bin === 1) pCount++;
             else fCount++;
           }
@@ -230,7 +182,10 @@ export default {
       this.failCount = fCount;
 
       this.rawWaferData = Object.freeze(data);
-      this.clearROI(); // 重新生成時清除舊的 ROI
+      
+      // 資料結構異動，重新烤焙快取底圖並重繪畫面
+      this.updateOffscreenCache();
+      this.drawWafer();
     },
 
     isDieFullyInsideWafer(x, y, R) {
@@ -240,9 +195,7 @@ export default {
         { cx: x, cy: y + 1 }, 
         { cx: x + 1, cy: y + 1 }, 
       ];
-      return corners.every((corner) => {
-        return corner.cx * corner.cx + corner.cy * corner.cy <= R * R;
-      });
+      return corners.every((corner) => corner.cx * corner.cx + corner.cy * corner.cy <= R * R);
     },
 
     resizeCanvas() {
@@ -255,21 +208,27 @@ export default {
       if (canvas) {
         canvas.width = size;
         canvas.height = size;
+
+        // 離屏畫布寬高必須與主畫布完全同步，貼圖才不會失真
+        this.offscreenCanvas.width = size;
+        this.offscreenCanvas.height = size;
+
+        // 縮放尺寸後，重新烤焙底圖
+        this.updateOffscreenCache();
         this.drawWafer();
       }
     },
 
-    // 2. 核心渲染引擎（融入固定 ROI 框與虛線動態拉框）
-    drawWafer() {
-      const canvas = this.$refs.waferCanvas;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
+    // 將昂貴的數萬次迴圈與圓框線製圖「預先烤焙」在離屏畫布上
+    updateOffscreenCache() {
       const size = this.canvasSize;
       const pad = this.padding;
       const usableSize = Math.max(size - pad * 2, 0);
       if (usableSize <= 0) return; 
+
+      const ctx = this.offscreenCtx;
+      // 抹除離屏舊底圖
+      ctx.clearRect(0, 0, size, size);
 
       const R = this.waferRadiusInDies;
       const totalGridUnits = R * 2 + 1;
@@ -287,7 +246,7 @@ export default {
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      // B. 繪製所有四象限的 Die
+      // B. 繪製所有靜態 Die 點位
       this.rawWaferData.forEach((die) => {
         if (!this.selectedBins.includes(die.bin)) return;
 
@@ -296,171 +255,64 @@ export default {
 
         ctx.fillStyle = die.bin === 1 ? "#4CAF50" : "#FF5252";
         ctx.fillRect(pixelX, pixelY, this.dieWidth - 0.5, this.dieHeight - 0.5);
-
-        // Hover 單格藍色提示外框
-        if (this.hoveredDie && this.hoveredDie.x === die.x && this.hoveredDie.y === die.y) {
-          ctx.strokeStyle = "#2196F3";
-          ctx.lineWidth = 1.5;
-          ctx.strokeRect(pixelX, pixelY, this.dieWidth, this.dieHeight);
-        }
       });
-
-      // 🔥 C. 渲染動態拉框（拖曳中的虛線框）
-      if (this.isDragging && this.dragStart && this.dragCurrent) {
-        ctx.save();
-        ctx.strokeStyle = "#607D8B";
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([6, 4]); // 建立 6px 實線、4px 空白的虛線效果
-        const rectW = this.dragCurrent.x - this.dragStart.x;
-        const rectH = this.dragCurrent.y - this.dragStart.y;
-        ctx.strokeRect(this.dragStart.x, this.dragStart.y, rectW, rectH);
-        
-        // 給予微透明的遮罩底色，加強產線觀測感
-        ctx.fillStyle = "rgba(96, 125, 139, 0.15)";
-        ctx.fillRect(this.dragStart.x, this.dragStart.y, rectW, rectH);
-        ctx.restore();
-      }
-
-      // 🔥 D. 渲染已固定的 ROI 框（放開滑鼠後的持久框線）
-      if (!this.isDragging && this.roiBounds) {
-        ctx.save();
-        ctx.strokeStyle = "#00BCD4"; // 產線科技藍
-        ctx.lineWidth = 2;
-        
-        // 從保存的四象限邏輯索引，反換算回當前的像素座標（支援 RWD resize 後位置不跑偏）
-        const pX1 = pixelCenterX + this.roiBounds.minX * this.dieWidth;
-        const pY1 = pixelCenterY - (this.roiBounds.maxY + 1) * this.dieHeight;
-        const pX2 = pixelCenterX + (this.roiBounds.maxX + 1) * this.dieWidth;
-        const pY2 = pixelCenterY - this.roiBounds.minY * this.dieHeight;
-
-        ctx.strokeRect(pX1, pY1, pX2 - pX1, pY2 - pY1);
-        ctx.fillStyle = "rgba(0, 188, 212, 0.08)";
-        ctx.fillRect(pX1, pY1, pX2 - pX1, pY2 - pY1);
-        ctx.restore();
-      }
     },
 
-    // 3. 事件鏈：滑鼠按下 (Mousedown)
-    handleMouseDown(event) {
+    // 純負責貼圖快取與疊加 Hover 元素
+    drawWafer() {
       const canvas = this.$refs.waferCanvas;
-      const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      
+      // A. 清空主畫布
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      this.isDragging = true;
-      this.dragStart = { x, y };
-      this.dragCurrent = { x, y };
-      this.hoveredDie = null; // 框選時停用單格 Hover 提示
+      // B. 瞬間貼上預先畫好的離屏快取圖 (GPU 快取拷貝，接近 0ms)
+      ctx.drawImage(this.offscreenCanvas, 0, 0);
+
+      // C. 疊加繪製：當前滑鼠單格 Hover 黑色提示外框
+      if (this.hoveredDie) {
+        const pixelCenterX = this.canvasSize / 2;
+        const pixelCenterY = this.canvasSize / 2;
+        
+        const pixelX = pixelCenterX + this.hoveredDie.x * this.dieWidth;
+        const pixelY = pixelCenterY - (this.hoveredDie.y + 1) * this.dieHeight;
+
+        ctx.strokeStyle = "#000000";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(pixelX, pixelY, this.dieWidth, this.dieHeight);
+      }
     },
 
-    // 4. 事件鏈：滑鼠移動 (Mousemove)
     handleMouseMove(event) {
       const canvas = this.$refs.waferCanvas;
       const rect = canvas.getBoundingClientRect();
+
       const mouseX = event.clientX - rect.left;
       const mouseY = event.clientY - rect.top;
 
-      if (this.isDragging) {
-        // A. 正在拉框狀態：僅更新像素座標並重繪
-        this.dragCurrent = { x: mouseX, y: mouseY };
-        this.drawWafer();
-      } else {
-        // B. 一般移動狀態：維持原有的單格 Hover 盲算反查
-        const pixelCenterX = this.canvasSize / 2;
-        const pixelCenterY = this.canvasSize / 2;
-
-        const gridX = Math.floor((mouseX - pixelCenterX) / this.dieWidth);
-        const gridY = Math.floor((pixelCenterY - mouseY) / this.dieHeight);
-
-        const foundDie = this.rawWaferData.find(
-          (die) => die.x === gridX && die.y === gridY
-        );
-
-        if (foundDie && this.selectedBins.includes(foundDie.bin)) {
-          if (!this.hoveredDie || this.hoveredDie.x !== foundDie.x || this.hoveredDie.y !== foundDie.y) {
-            this.hoveredDie = foundDie;
-            this.drawWafer();
-          }
-        } else {
-          this.handleMouseLeave();
-        }
-      }
-    },
-
-    // 5. 事件鏈：滑鼠放開 (Mouseup)
-    handleMouseUp() {
-      if (!this.isDragging) return;
-      this.isDragging = false;
-
-      // 檢查拉框位移量，若只是原地單擊則視為取消框選
-      const distance = Math.hypot(this.dragCurrent.x - this.dragStart.x, this.dragCurrent.y - this.dragStart.y);
-      if (distance < 5) {
-        this.clearROI();
-        return;
-      }
-
-      // 將拉框的起點與終點像素，盲算還原為「四象限邏輯座標區間」
       const pixelCenterX = this.canvasSize / 2;
       const pixelCenterY = this.canvasSize / 2;
 
-      const gX1 = Math.floor((this.dragStart.x - pixelCenterX) / this.dieWidth);
-      const gY1 = Math.floor((pixelCenterY - this.dragStart.y) / this.dieHeight);
-      const gX2 = Math.floor((this.dragCurrent.x - pixelCenterX) / this.dieWidth);
-      const gY2 = Math.floor((pixelCenterY - this.dragCurrent.y) / this.dieHeight);
+      const gridX = Math.floor((mouseX - pixelCenterX) / this.dieWidth);
+      const gridY = Math.floor((pixelCenterY - mouseY) / this.dieHeight);
 
-      // 保存標準化的邊界，不論使用者是由左往右拉、還是由右往左斜拉
-      this.roiBounds = {
-        minX: Math.min(gX1, gX2),
-        maxX: Math.max(gX1, gX2),
-        minY: Math.min(gY1, gY2),
-        maxY: Math.max(gY1, gY2)
-      };
+      const foundDie = this.rawWaferData.find(
+        (die) => die.x === gridX && die.y === gridY
+      );
 
-      this.calculateROIOptimized();
-    },
-
-    // 6. $O(1)$ 範圍過濾：高效能 ROI 良率統計
-    calculateROIOptimized() {
-      if (!this.roiBounds) return;
-
-      let total = 0;
-      let pass = 0;
-      let fail = 0;
-
-      // 走訪凍結的原始大陣列，利用剛才算出的邊界進行極其高效的範圍比對
-      this.rawWaferData.forEach((die) => {
-        // A. 判定是否落在框選的四象限幾何範圍內
+      if (foundDie && this.selectedBins.includes(foundDie.bin)) {
         if (
-          die.x >= this.roiBounds.minX &&
-          die.x <= this.roiBounds.maxX &&
-          die.y >= this.roiBounds.minY &&
-          die.y <= this.roiBounds.maxY
+          !this.hoveredDie ||
+          this.hoveredDie.x !== foundDie.x ||
+          this.hoveredDie.y !== foundDie.y
         ) {
-          // B. 只有當前「被勾選顯示」的 Bin Code 才納入統計計算
-          if (this.selectedBins.includes(die.bin)) {
-            total++;
-            if (die.bin === 1) pass++;
-            else fail++;
-          }
+          this.hoveredDie = foundDie;
+          this.drawWafer(); 
         }
-      });
-
-      this.roiStats = {
-        total,
-        pass,
-        fail,
-        yield: total === 0 ? "0.00" : ((pass / total) * 100).toFixed(2)
-      };
-
-      this.drawWafer(); // 固化 ROI 藍色框線
-    },
-
-    clearROI() {
-      this.roiBounds = null;
-      this.roiStats = null;
-      this.dragStart = null;
-      this.dragCurrent = null;
-      this.drawWafer();
+      } else {
+        this.handleMouseLeave();
+      }
     },
 
     handleMouseLeave() {
