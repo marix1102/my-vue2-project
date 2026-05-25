@@ -9,7 +9,9 @@
           <v-subheader class="pl-0 font-weight-bold">地圖渲染模式</v-subheader>
           <v-radio-group v-model="renderMode" row class="mt-0" hide-details>
             <v-radio label="Hard Bin 模式" value="hardBin"></v-radio>
-            <v-radio label="電壓熱力圖 (Voltage)" value="voltageHeatmap"
+            <v-radio
+              label="電壓熱力圖 (Voltage)"
+              value="voltageHeatmap"
             ></v-radio>
           </v-radio-group>
 
@@ -106,9 +108,6 @@
             class="mt-2"
           ></v-progress-linear>
 
-          <v-btn color="primary" block class="mt-6" @click="generateWaferMap">
-            重新生成測試資料
-          </v-btn>
         </v-card>
       </v-col>
 
@@ -132,22 +131,24 @@
 </template>
 
 <script>
+import { getWaferMapData } from '@/api/wafer'
+
 export default {
   name: "WaferMapDataDriven",
   data() {
     return {
+      loading: false,
       hoveredDie: null,
       totalDies: 0,
       selectedBins: [1, 2],
-      renderMode: "hardBin", // 當前視覺渲染模式：hardBin 或是 voltageHeatmap
+      renderMode: "hardBin",
       passCount: 0,
       failCount: 0,
-      waferRadiusInDies: 30,
+      waferRadiusInDies: 30, // 預設 30，後續由後端動態覆蓋
       padding: 20,
     };
   },
   watch: {
-    // 當任何與「視覺表現相關」的變數變動時，觸發中央重繪
     selectedBins() {
       this.refreshMap();
     },
@@ -171,12 +172,11 @@ export default {
     this.dieWidth = 0;
     this.dieHeight = 0;
 
-    // 初始化快取離屏畫布
     this.offscreenCanvas = document.createElement("canvas");
     this.offscreenCtx = this.offscreenCanvas.getContext("2d");
   },
   mounted() {
-    this.generateWaferMap();
+    this.fetchWaferMapFromBackend();
     this.resizeCanvas();
     window.addEventListener("resize", this.resizeCanvas);
   },
@@ -184,58 +184,36 @@ export default {
     window.removeEventListener("resize", this.resizeCanvas);
   },
   methods: {
-    // 1. 模擬巨量產線測試數據（包含多元測試資料欄位）
-    generateWaferMap() {
-      const data = [];
-      const R = this.waferRadiusInDies;
+    // 異步非同步讀取後端資料
+    async fetchWaferMapFromBackend() {
+      this.loading = true;
+      try {
+        const resData = await getWaferMapData();
+        console.log('resData ',resData)
+        // 解構後端響應結構
+        this.waferRadiusInDies = resData.waferRadiusInDies;
+        this.totalDies = resData.totalDies;
+        this.passCount = resData.passCount;
+        this.failCount = resData.failCount;
 
-      let pCount = 0;
-      let fCount = 0;
+        this.rawWaferData = Object.freeze(resData.dies);
 
-      for (let x = -R; x <= R; x++) {
-        for (let y = -R; y <= R; y++) {
-          if (this.isDieFullyInsideWafer(x, y, R)) {
-            const isPass = Math.random() > 0.12;
-
-            // 各業務與參數欄位完全封裝在 properties 內部
-            data.push({
-              x,
-              y,
-              properties: {
-                bin: isPass ? 1 : 2,
-                softBin: isPass ? (Math.random() > 0.5 ? 11 : 12) : 21,
-                voltage: parseFloat(
-                  (isPass
-                    ? 1.1 + Math.random() * 0.2
-                    : 0.5 + Math.random() * 0.4
-                  ).toFixed(3)
-                ),
-                current: parseFloat((Math.random() * 50).toFixed(2)),
-              },
-            });
-
-            if (isPass) pCount++;
-            else fCount++;
-          }
-        }
+        // 渲染調度
+        this.refreshMap();
+      } catch (error) {
+        console.error("無法自 Spring Boot 獲取晶圓圖資料:", error);
+      } finally {
+        this.loading = false;
       }
-
-      this.totalDies = data.length;
-      this.passCount = pCount;
-      this.failCount = fCount;
-
-      this.rawWaferData = Object.freeze(data);
-      this.refreshMap();
     },
 
     /**
-     * 【核心架構：業務解耦色彩與過濾適配器】
-     * 這是整個專案中，唯一與具體業務欄位（bin、voltage）產生相依的地方。
-     * 渲染層迴圈只管把 die 丟進來，這個適配器負責回傳「顏色字串」。
-     * 如果回傳 null，代表該晶粒目前被過濾隱藏，不進行繪製。
+     * 色彩與過濾適配器
+     * 相容後端 properties 封裝，任何動態欄位擴充只要在此修改對應即可
      */
     colorAdapter(die) {
       const props = die.properties;
+      if (!props) return "#CCCCCC";
 
       // A. Hard Bin 渲染模式
       if (this.renderMode === "hardBin") {
@@ -261,7 +239,6 @@ export default {
       return "#CCCCCC";
     },
 
-    // 2. 畫布底層製圖：徹底去業務化，只負責機械式地拿色彩塗色
     updateOffscreenCache() {
       const size = this.canvasSize;
       const pad = this.padding;
@@ -289,9 +266,8 @@ export default {
 
       // 迭代繪製所有靜態 Die 點位
       this.rawWaferData.forEach((die) => {
-        // Canvas 不需要判斷什麼是 bin，直接索取色彩
         const color = this.colorAdapter(die);
-        if (!color) return; // 適配器判定不需渲染（被過濾），直接跳過
+        if (!color) return;
 
         const pixelX = pixelCenterX + die.x * this.dieWidth;
         const pixelY = pixelCenterY - (die.y + 1) * this.dieHeight;
@@ -301,7 +277,6 @@ export default {
       });
     },
 
-    // 統一重新烤焙快取底圖與重新繪製的調度方法
     refreshMap() {
       this.updateOffscreenCache();
       this.drawWafer();
@@ -371,18 +346,6 @@ export default {
       }
     },
 
-    isDieFullyInsideWafer(x, y, R) {
-      const corners = [
-        { cx: x, cy: y },
-        { cx: x + 1, cy: y },
-        { cx: x, cy: y + 1 },
-        { cx: x + 1, cy: y + 1 },
-      ];
-      return corners.every(
-        (corner) => corner.cx * corner.cx + corner.cy * corner.cy <= R * R
-      );
-    },
-
     resizeCanvas() {
       const container = this.$refs.canvasContainer.$el;
       if (!container) return;
@@ -395,7 +358,6 @@ export default {
         canvas.height = size;
         this.offscreenCanvas.width = size;
         this.offscreenCanvas.height = size;
-
         this.refreshMap();
       }
     },
