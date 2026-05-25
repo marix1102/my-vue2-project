@@ -6,27 +6,45 @@
           <v-card-title class="headline">Wafer 資訊</v-card-title>
           <v-divider class="my-2"></v-divider>
 
+          <v-subheader class="pl-0 font-weight-bold">地圖渲染模式</v-subheader>
+          <v-radio-group v-model="renderMode" row class="mt-0" hide-details>
+            <v-radio label="Hard Bin 模式" value="hardBin"></v-radio>
+            <v-radio label="電壓熱力圖 (Voltage)" value="voltageHeatmap"
+            ></v-radio>
+          </v-radio-group>
+
+          <v-divider class="my-2"></v-divider>
+
           <v-list dense>
             <v-list-item>
-              <v-list-item-content>當前四象限座標:</v-list-item-content>
-              <v-list-item-content class="align-end font-weight-bold blue--text">
+              <v-list-item-content>當前座標:</v-list-item-content>
+              <v-list-item-content
+                class="align-end font-weight-bold blue--text"
+              >
                 {{ hoveredDie ? `(${hoveredDie.x}, ${hoveredDie.y})` : "無" }}
               </v-list-item-content>
             </v-list-item>
             <v-list-item>
-              <v-list-item-content>Bin Code:</v-list-item-content>
+              <v-list-item-content>詳細數據庫:</v-list-item-content>
               <v-list-item-content
-                class="align-end font-weight-bold"
-                :style="{ color: hoveredDieColor }"
+                class="align-end font-weight-bold caption"
+                style="text-align: right"
               >
-                {{ hoveredDie ? `Bin ${hoveredDie.bin}` : "無" }}
+                <template v-if="hoveredDie">
+                  Hard Bin: {{ hoveredDie.properties.bin }}<br />
+                  Soft Bin: {{ hoveredDie.properties.softBin }}<br />
+                  Voltage: {{ hoveredDie.properties.voltage }} V
+                </template>
+                <template v-else>無</template>
               </v-list-item-content>
             </v-list-item>
           </v-list>
 
           <v-divider class="my-2"></v-divider>
-          <v-subheader class="pl-0 font-weight-bold">Bin Code 過濾篩選</v-subheader>
-          
+          <v-subheader class="pl-0 font-weight-bold"
+            >Bin Code 過濾篩選</v-subheader
+          >
+
           <v-checkbox
             v-model="selectedBins"
             label="Bin 1 (良品 - 綠色)"
@@ -44,7 +62,9 @@
           ></v-checkbox>
 
           <v-divider class="my-4"></v-divider>
-          <v-subheader class="pl-0 font-weight-bold">數據統計 (Summary)</v-subheader>
+          <v-subheader class="pl-0 font-weight-bold"
+            >數據統計 (Summary)</v-subheader
+          >
 
           <v-list dense class="pa-0">
             <v-list-item class="px-0">
@@ -55,7 +75,9 @@
             </v-list-item>
             <v-list-item class="px-0">
               <v-list-item-content>合格數 (Pass):</v-list-item-content>
-              <v-list-item-content class="align-end font-weight-bold green--text">
+              <v-list-item-content
+                class="align-end font-weight-bold green--text"
+              >
                 {{ passCount }}
               </v-list-item-content>
             </v-list-item>
@@ -67,7 +89,9 @@
             </v-list-item>
             <v-list-item class="px-0">
               <v-list-item-content>整片良率 (Gross Yield):</v-list-item-content>
-              <v-list-item-content class="align-end font-weight-bold blue--text">
+              <v-list-item-content
+                class="align-end font-weight-bold blue--text"
+              >
                 {{ grossYield }} %
               </v-list-item-content>
             </v-list-item>
@@ -109,29 +133,32 @@
 
 <script>
 export default {
-  name: "WaferMapFourQuadrants",
+  name: "WaferMapDataDriven",
   data() {
     return {
       hoveredDie: null,
       totalDies: 0,
-      selectedBins: [1, 2], 
+      selectedBins: [1, 2],
+      renderMode: "hardBin", // 當前視覺渲染模式：hardBin 或是 voltageHeatmap
       passCount: 0,
       failCount: 0,
-      waferRadiusInDies: 30, 
-      padding: 20, 
+      waferRadiusInDies: 30,
+      padding: 20,
     };
   },
   watch: {
-    // 當過濾條件變更時，必須重新繪製離屏快取背景，再刷新主畫面
+    // 當任何與「視覺表現相關」的變數變動時，觸發中央重繪
     selectedBins() {
-      this.updateOffscreenCache();
-      this.drawWafer();
+      this.refreshMap();
+    },
+    renderMode() {
+      this.refreshMap();
     },
   },
   computed: {
     hoveredDieColor() {
       if (!this.hoveredDie) return "";
-      return this.hoveredDie.bin === 1 ? "green" : "red";
+      return this.hoveredDie.properties.bin === 1 ? "green" : "red";
     },
     grossYield() {
       if (this.totalDies === 0) return "0.00";
@@ -139,13 +166,12 @@ export default {
     },
   },
   created() {
-    // 非回應式變數避免 Vue 精準監聽耗損效能
     this.rawWaferData = [];
     this.canvasSize = 500;
     this.dieWidth = 0;
     this.dieHeight = 0;
 
-    // 初始化記憶體中的離屏畫布與隱藏 Context 
+    // 初始化快取離屏畫布
     this.offscreenCanvas = document.createElement("canvas");
     this.offscreenCtx = this.offscreenCanvas.getContext("2d");
   },
@@ -158,20 +184,37 @@ export default {
     window.removeEventListener("resize", this.resizeCanvas);
   },
   methods: {
+    // 1. 模擬巨量產線測試數據（包含多元測試資料欄位）
     generateWaferMap() {
       const data = [];
       const R = this.waferRadiusInDies;
-      
+
       let pCount = 0;
       let fCount = 0;
 
       for (let x = -R; x <= R; x++) {
         for (let y = -R; y <= R; y++) {
           if (this.isDieFullyInsideWafer(x, y, R)) {
-            const bin = Math.random() > 0.12 ? 1 : 2;
-            data.push({ x, y, bin });
+            const isPass = Math.random() > 0.12;
 
-            if (bin === 1) pCount++;
+            // 各業務與參數欄位完全封裝在 properties 內部
+            data.push({
+              x,
+              y,
+              properties: {
+                bin: isPass ? 1 : 2,
+                softBin: isPass ? (Math.random() > 0.5 ? 11 : 12) : 21,
+                voltage: parseFloat(
+                  (isPass
+                    ? 1.1 + Math.random() * 0.2
+                    : 0.5 + Math.random() * 0.4
+                  ).toFixed(3)
+                ),
+                current: parseFloat((Math.random() * 50).toFixed(2)),
+              },
+            });
+
+            if (isPass) pCount++;
             else fCount++;
           }
         }
@@ -182,52 +225,50 @@ export default {
       this.failCount = fCount;
 
       this.rawWaferData = Object.freeze(data);
-      
-      // 資料結構異動，重新烤焙快取底圖並重繪畫面
-      this.updateOffscreenCache();
-      this.drawWafer();
+      this.refreshMap();
     },
 
-    isDieFullyInsideWafer(x, y, R) {
-      const corners = [
-        { cx: x, cy: y }, 
-        { cx: x + 1, cy: y }, 
-        { cx: x, cy: y + 1 }, 
-        { cx: x + 1, cy: y + 1 }, 
-      ];
-      return corners.every((corner) => corner.cx * corner.cx + corner.cy * corner.cy <= R * R);
-    },
+    /**
+     * 【核心架構：業務解耦色彩與過濾適配器】
+     * 這是整個專案中，唯一與具體業務欄位（bin、voltage）產生相依的地方。
+     * 渲染層迴圈只管把 die 丟進來，這個適配器負責回傳「顏色字串」。
+     * 如果回傳 null，代表該晶粒目前被過濾隱藏，不進行繪製。
+     */
+    colorAdapter(die) {
+      const props = die.properties;
 
-    resizeCanvas() {
-      const container = this.$refs.canvasContainer.$el; 
-      if (!container) return;
-      const size = Math.max(Math.min(container.clientWidth - 32, 600), 0);
-      this.canvasSize = size;
-
-      const canvas = this.$refs.waferCanvas;
-      if (canvas) {
-        canvas.width = size;
-        canvas.height = size;
-
-        // 離屏畫布寬高必須與主畫布完全同步，貼圖才不會失真
-        this.offscreenCanvas.width = size;
-        this.offscreenCanvas.height = size;
-
-        // 縮放尺寸後，重新烤焙底圖
-        this.updateOffscreenCache();
-        this.drawWafer();
+      // A. Hard Bin 渲染模式
+      if (this.renderMode === "hardBin") {
+        if (!this.selectedBins.includes(props.bin)) return null; // 被過濾篩選掉，不渲染
+        return props.bin === 1 ? "#4CAF50" : "#FF5252";
       }
+
+      // B. 電壓參數熱力圖模式 (Voltage Heatmap)
+      if (this.renderMode === "voltageHeatmap") {
+        // 假設實體安全電壓區間落在 0.5V ~ 1.3V，將其對應為動態色階
+        const minV = 0.5;
+        const maxV = 1.3;
+        const ratio = Math.min(
+          Math.max((props.voltage - minV) / (maxV - minV), 0),
+          1
+        );
+
+        // 240度(藍色, 低壓) 到 0度(紅色, 高壓) 的 HSL 色階漸層轉換，每隔120度佔據一個核心位置：0度或360度：紅色，120度：綠色，240度：藍色
+        const hue = (1 - ratio) * 240;
+        return `hsl(${hue}, 100%, 50%)`;
+      }
+
+      return "#CCCCCC";
     },
 
-    // 將昂貴的數萬次迴圈與圓框線製圖「預先烤焙」在離屏畫布上
+    // 2. 畫布底層製圖：徹底去業務化，只負責機械式地拿色彩塗色
     updateOffscreenCache() {
       const size = this.canvasSize;
       const pad = this.padding;
       const usableSize = Math.max(size - pad * 2, 0);
-      if (usableSize <= 0) return; 
+      if (usableSize <= 0) return;
 
       const ctx = this.offscreenCtx;
-      // 抹除離屏舊底圖
       ctx.clearRect(0, 0, size, size);
 
       const R = this.waferRadiusInDies;
@@ -238,43 +279,50 @@ export default {
       const pixelCenterX = size / 2;
       const pixelCenterY = size / 2;
 
-      // A. 繪製 Wafer 圓框線
-      const radiusInPixels = R * this.dieWidth; 
+      // 繪製 Wafer 圓框線
+      const radiusInPixels = R * this.dieWidth;
       ctx.beginPath();
       ctx.arc(pixelCenterX, pixelCenterY, radiusInPixels, 0, 2 * Math.PI);
       ctx.strokeStyle = "#444444";
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      // B. 繪製所有靜態 Die 點位
+      // 迭代繪製所有靜態 Die 點位
       this.rawWaferData.forEach((die) => {
-        if (!this.selectedBins.includes(die.bin)) return;
+        // Canvas 不需要判斷什麼是 bin，直接索取色彩
+        const color = this.colorAdapter(die);
+        if (!color) return; // 適配器判定不需渲染（被過濾），直接跳過
 
         const pixelX = pixelCenterX + die.x * this.dieWidth;
         const pixelY = pixelCenterY - (die.y + 1) * this.dieHeight;
 
-        ctx.fillStyle = die.bin === 1 ? "#4CAF50" : "#FF5252";
+        ctx.fillStyle = color;
         ctx.fillRect(pixelX, pixelY, this.dieWidth - 0.5, this.dieHeight - 0.5);
       });
     },
 
-    // 純負責貼圖快取與疊加 Hover 元素
+    // 統一重新烤焙快取底圖與重新繪製的調度方法
+    refreshMap() {
+      this.updateOffscreenCache();
+      this.drawWafer();
+    },
+
+    // 輕量主畫布渲染層：純負責將離屏快取「一鍵貼上」並重疊當前 Hover 提示框
     drawWafer() {
       const canvas = this.$refs.waferCanvas;
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
-      
-      // A. 清空主畫布
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // B. 瞬間貼上預先畫好的離屏快取圖 (GPU 快取拷貝，接近 0ms)
+      // 直接使用 GPU 快取拷貝貼圖
       ctx.drawImage(this.offscreenCanvas, 0, 0);
 
-      // C. 疊加繪製：當前滑鼠單格 Hover 黑色提示外框
+      // 疊加繪製：當前滑鼠單格 Hover 黑色提示外框
       if (this.hoveredDie) {
         const pixelCenterX = this.canvasSize / 2;
         const pixelCenterY = this.canvasSize / 2;
-        
+
         const pixelX = pixelCenterX + this.hoveredDie.x * this.dieWidth;
         const pixelY = pixelCenterY - (this.hoveredDie.y + 1) * this.dieHeight;
 
@@ -301,14 +349,15 @@ export default {
         (die) => die.x === gridX && die.y === gridY
       );
 
-      if (foundDie && this.selectedBins.includes(foundDie.bin)) {
+      // 滑鼠互動判定解耦：向適配器確認該點目前在畫面上是否「可見（非 null）」
+      if (foundDie && this.colorAdapter(foundDie) !== null) {
         if (
           !this.hoveredDie ||
           this.hoveredDie.x !== foundDie.x ||
           this.hoveredDie.y !== foundDie.y
         ) {
           this.hoveredDie = foundDie;
-          this.drawWafer(); 
+          this.drawWafer();
         }
       } else {
         this.handleMouseLeave();
@@ -319,6 +368,35 @@ export default {
       if (this.hoveredDie) {
         this.hoveredDie = null;
         this.drawWafer();
+      }
+    },
+
+    isDieFullyInsideWafer(x, y, R) {
+      const corners = [
+        { cx: x, cy: y },
+        { cx: x + 1, cy: y },
+        { cx: x, cy: y + 1 },
+        { cx: x + 1, cy: y + 1 },
+      ];
+      return corners.every(
+        (corner) => corner.cx * corner.cx + corner.cy * corner.cy <= R * R
+      );
+    },
+
+    resizeCanvas() {
+      const container = this.$refs.canvasContainer.$el;
+      if (!container) return;
+      const size = Math.max(Math.min(container.clientWidth - 32, 600), 0);
+      this.canvasSize = size;
+
+      const canvas = this.$refs.waferCanvas;
+      if (canvas) {
+        canvas.width = size;
+        canvas.height = size;
+        this.offscreenCanvas.width = size;
+        this.offscreenCanvas.height = size;
+
+        this.refreshMap();
       }
     },
   },
