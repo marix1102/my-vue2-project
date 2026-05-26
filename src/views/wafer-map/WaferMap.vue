@@ -108,6 +108,17 @@
             class="mt-2"
           ></v-progress-linear>
 
+          <v-divider class="my-2"></v-divider>
+
+          <v-subheader class="pl-0 font-weight-bold">畫布視角操作</v-subheader>
+          <div class="caption grey--text text--darken-1 mb-2">
+            滾輪：放大/縮小 <br />
+            拖拽：按住滑鼠左鍵移動
+          </div>
+          <v-btn small block color="primary" outlined @click="resetView">
+            重設視角 (Reset View)
+          </v-btn>
+
         </v-card>
       </v-col>
 
@@ -121,8 +132,11 @@
           <canvas
             ref="waferCanvas"
             @mousemove="handleMouseMove"
-            @mouseleave="handleMouseLeave"
-            style="border: 1px solid #ccc; background-color: #fafafa"
+            @mousedown="handleMouseDown"
+            @mouseup="handleMouseUp"
+            @mouseleave="handleCanvasLeave"
+            @wheel.prevent="handleWheel"
+            style="border: 1px solid #ccc; background-color: #fafafa; cursor: grab;"
           ></canvas>
         </v-card>
       </v-col>
@@ -144,8 +158,14 @@ export default {
       renderMode: "hardBin",
       passCount: 0,
       failCount: 0,
-      waferRadiusInDies: 30, // 預設 30，後續由後端動態覆蓋
+      waferRadiusInDies: 30, 
       padding: 20,
+
+      //縮放與平移視角控制狀態
+      scale: 1,         // 目前放大倍率 (1 為原始大小)
+      offsetX: 0,       // X 軸平移像素
+      offsetY: 0,       // Y 軸平移像素
+      isDragging: false // 是否正按著滑鼠拖拽中
     };
   },
   watch: {
@@ -172,6 +192,9 @@ export default {
     this.dieWidth = 0;
     this.dieHeight = 0;
 
+    // 用於記錄拖拽滑鼠前一個瞬間的物理點
+    this.dragStart = { x: 0, y: 0 };
+
     this.offscreenCanvas = document.createElement("canvas");
     this.offscreenCtx = this.offscreenCanvas.getContext("2d");
   },
@@ -189,17 +212,15 @@ export default {
       this.loading = true;
       try {
         const resData = await getWaferMapData();
-        console.log('resData ',resData)
-        // 解構後端響應結構
         this.waferRadiusInDies = resData.waferRadiusInDies;
         this.totalDies = resData.totalDies;
         this.passCount = resData.passCount;
         this.failCount = resData.failCount;
 
         this.rawWaferData = Object.freeze(resData.dies);
-
-        // 渲染調度
-        this.refreshMap();
+        
+        // 載入新資料時重設視角，確保圖表居中
+        this.resetView(); 
       } catch (error) {
         console.error("無法自 Spring Boot 獲取晶圓圖資料:", error);
       } finally {
@@ -215,13 +236,11 @@ export default {
       const props = die.properties;
       if (!props) return "#CCCCCC";
 
-      // A. Hard Bin 渲染模式
       if (this.renderMode === "hardBin") {
         if (!this.selectedBins.includes(props.bin)) return null; // 被過濾篩選掉，不渲染
         return props.bin === 1 ? "#4CAF50" : "#FF5252";
       }
 
-      // B. 電壓參數熱力圖模式 (Voltage Heatmap)
       if (this.renderMode === "voltageHeatmap") {
         // 假設實體安全電壓區間落在 0.5V ~ 1.3V，將其對應為動態色階
         const minV = 0.5;
@@ -235,10 +254,10 @@ export default {
         const hue = (1 - ratio) * 240;
         return `hsl(${hue}, 100%, 50%)`;
       }
-
       return "#CCCCCC";
     },
 
+    // 維持繪製完整的 1:1 原始地圖快取 (不受 Pan/Zoom 影響)
     updateOffscreenCache() {
       const size = this.canvasSize;
       const pad = this.padding;
@@ -273,7 +292,8 @@ export default {
         const pixelY = pixelCenterY - (die.y + 1) * this.dieHeight;
 
         ctx.fillStyle = color;
-        ctx.fillRect(pixelX, pixelY, this.dieWidth - 0.5, this.dieHeight - 0.5);
+        // 留 0.3 像素作為網格線格線感
+        ctx.fillRect(pixelX, pixelY, this.dieWidth - 0.3, this.dieHeight - 0.3);
       });
     },
 
@@ -282,7 +302,7 @@ export default {
       this.drawWafer();
     },
 
-    // 輕量主畫布渲染層：純負責將離屏快取「一鍵貼上」並重疊當前 Hover 提示框
+    // 在此處實作平移與縮放矩陣操作
     drawWafer() {
       const canvas = this.$refs.waferCanvas;
       if (!canvas) return;
@@ -290,10 +310,17 @@ export default {
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // 直接使用 GPU 快取拷貝貼圖
+      // 保存乾淨的初始狀態環境
+      ctx.save();
+      
+      // 先平移到當前拖拽位移，再進行縮放
+      ctx.translate(this.offsetX, this.offsetY);
+      ctx.scale(this.scale, this.scale);
+
+      // 將 1:1 的離屏快取圖，透過矩陣縮放畫上主畫布
       ctx.drawImage(this.offscreenCanvas, 0, 0);
 
-      // 疊加繪製：當前滑鼠單格 Hover 黑色提示外框
+      // 當前滑鼠單格 Hover 提示外框
       if (this.hoveredDie) {
         const pixelCenterX = this.canvasSize / 2;
         const pixelCenterY = this.canvasSize / 2;
@@ -302,23 +329,102 @@ export default {
         const pixelY = pixelCenterY - (this.hoveredDie.y + 1) * this.dieHeight;
 
         ctx.strokeStyle = "#000000";
-        ctx.lineWidth = 1;
+        // 隨著放大，提示線條寬度等比例縮小，避免外框變粗太醜
+        ctx.lineWidth = 1 / this.scale; 
         ctx.strokeRect(pixelX, pixelY, this.dieWidth, this.dieHeight);
+      }
+
+      // 恢復畫布狀態
+      ctx.restore();
+    },
+
+    // 滑鼠滾輪事件處理 (以滑鼠所在位置為中心點進行縮放)
+    handleWheel(event) {
+      const canvas = this.$refs.waferCanvas;
+      const rect = canvas.getBoundingClientRect();
+      
+      // 取得目前滑鼠在畫布上的物理像素座標
+      const mouseX = event.clientX - rect.left;
+      const mouseY = event.clientY - rect.top;
+
+      // 計算縮放係數
+      const zoomFactor = 1.1;
+      //event.deltaY 滑鼠滾輪
+      let newScale = event.deltaY < 0 ? this.scale * zoomFactor : this.scale / zoomFactor;
+      
+      // 限制縮放範圍：最小 1 倍，最大 40 倍（防止縮太小或無限放大放大）
+      newScale = Math.min(Math.max(newScale, 1), 40);
+
+      if (newScale === this.scale) return;
+
+      // 調整平移補償，使縮放時「滑鼠所指的點」不會飄走
+      this.offsetX = mouseX - (mouseX - this.offsetX) * (newScale / this.scale);
+      this.offsetY = mouseY - (mouseY - this.offsetY) * (newScale / this.scale);
+      this.scale = newScale;
+
+      // 縮放時同步更新當前滑鼠下的 Die 提示
+      this.calculateHoverDie(event);
+      this.drawWafer();
+    },
+
+    // 滑鼠左鍵點下開始拖拽平移
+    handleMouseDown(event) {
+      if (event.button !== 0) return; // 只允許左鍵拖拽
+      this.isDragging = true;
+      this.$refs.waferCanvas.style.cursor = 'grabbing';
+      
+      this.dragStart.x = event.clientX - this.offsetX;
+      this.dragStart.y = event.clientY - this.offsetY;
+    },
+
+    // 放開滑鼠
+    handleMouseUp() {
+      this.isDragging = false;
+      if (this.$refs.waferCanvas) {
+        this.$refs.waferCanvas.style.cursor = 'grab';
       }
     },
 
+    // 滑鼠離開畫布
+    handleCanvasLeave() {
+      this.handleMouseUp();
+      this.handleMouseLeave();
+    },
+
+    // 滑鼠移動時
     handleMouseMove(event) {
+      if (this.isDragging) {
+        // 處理視角平移
+        this.offsetX = event.clientX - this.dragStart.x;
+        this.offsetY = event.clientY - this.dragStart.y;
+        
+        // 平移時不觸發新的 Hover 資訊更新
+        this.drawWafer();
+      } else {
+        // 純移動時計算 Hover 晶粒
+        this.calculateHoverDie(event);
+      }
+    },
+
+    //引入逆矩陣，精確計算縮放平移後的 Die 座標
+    calculateHoverDie(event) {
       const canvas = this.$refs.waferCanvas;
+      if (!canvas) return;
       const rect = canvas.getBoundingClientRect();
 
       const mouseX = event.clientX - rect.left;
       const mouseY = event.clientY - rect.top;
 
+      // 將畫布的「物理滑鼠座標」反推回原始 1:1 的「虛擬快取座標」
+      const transformedX = (mouseX - this.offsetX) / this.scale;
+      const transformedY = (mouseY - this.offsetY) / this.scale;
+
       const pixelCenterX = this.canvasSize / 2;
       const pixelCenterY = this.canvasSize / 2;
 
-      const gridX = Math.floor((mouseX - pixelCenterX) / this.dieWidth);
-      const gridY = Math.floor((pixelCenterY - mouseY) / this.dieHeight);
+      // 使用反推後的座標計算邏輯網格位置
+      const gridX = Math.floor((transformedX - pixelCenterX) / this.dieWidth);
+      const gridY = Math.floor((pixelCenterY - transformedY) / this.dieHeight);
 
       const foundDie = this.rawWaferData.find(
         (die) => die.x === gridX && die.y === gridY
@@ -346,6 +452,15 @@ export default {
       }
     },
 
+    // 一鍵回歸初始視角
+    resetView() {
+      this.scale = 1;
+      this.offsetX = 0;
+      this.offsetY = 0;
+      this.hoveredDie = null;
+      this.refreshMap();
+    },
+
     resizeCanvas() {
       const container = this.$refs.canvasContainer.$el;
       if (!container) return;
@@ -358,7 +473,8 @@ export default {
         canvas.height = size;
         this.offscreenCanvas.width = size;
         this.offscreenCanvas.height = size;
-        this.refreshMap();
+        // 視窗大小改變時重設視角，避免畫面歪掉
+        this.resetView(); 
       }
     },
   },
