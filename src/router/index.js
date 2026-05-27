@@ -17,8 +17,10 @@ import SimpleDialog from '../components/form/SimpleDialog.vue'
 import SimpleTextField from '../components/form/SimpleTextField.vue'
 import SimpleDatePicker from '../components/form/SimpleDatePicker.vue'
 import SimpleMenu from '../components/form/SimpleMenu.vue'
+import SimpleMixin from '../components/form/SimpleMixin.vue'
 
-
+import SimpleKeepAlive from '@/components/keep-alive/SimpleKeepAlive.vue'
+import SimpleEventBus from '@/components/event-bus/SimpleEventBus.vue'
 
 Vue.use(VueRouter)
 
@@ -86,6 +88,18 @@ const routes = [
       {
         path: '/list/wafer-map',
         component: WaferMap 
+      },
+      {
+        path: '/list/simple-mixin',
+        component: SimpleMixin 
+      },
+      {
+        path: '/list/keep-alive',
+        component: SimpleKeepAlive 
+      },
+      {
+        path: '/list/event-bus',
+        component: SimpleEventBus 
       }
     ]
   },

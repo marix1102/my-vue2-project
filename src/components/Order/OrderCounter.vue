@@ -60,6 +60,7 @@ export default {
         note: "不加糖",
       };
       this.$emit("new-order", orderDetails, this.isTakeOut);
+      this.$myAlert('已送出訂單！');
     },
   },
 };
