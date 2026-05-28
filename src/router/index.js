@@ -24,6 +24,8 @@ import SimpleEventBus from '@/components/event-bus/SimpleEventBus.vue'
 
 import LazyLoad from '@/components/load/LazyLoad.vue'
 import Badge from '@/components/badge/Badge.vue'
+import SimpleVirtualScroller from '@/components/virtual-scroller/SimpleVirtualScroller.vue'
+import LayerCompositionDemo from '@/components/layer-composition/LayerCompositionDemo.vue'
 
 Vue.use(VueRouter)
 
@@ -111,6 +113,14 @@ const routes = [
       {
         path: '/list/badge',
         component: Badge 
+      },
+      {
+        path: '/list/virtual-scroller',
+        component: SimpleVirtualScroller 
+      },
+      {
+        path: '/list/layer-composition',
+        component: LayerCompositionDemo 
       }
     ]
   },
