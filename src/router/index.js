@@ -22,6 +22,9 @@ import SimpleMixin from '../components/form/SimpleMixin.vue'
 import SimpleKeepAlive from '@/components/keep-alive/SimpleKeepAlive.vue'
 import SimpleEventBus from '@/components/event-bus/SimpleEventBus.vue'
 
+import LazyLoad from '@/components/load/LazyLoad.vue'
+import Badge from '@/components/badge/Badge.vue'
+
 Vue.use(VueRouter)
 
 const routes = [
@@ -100,6 +103,14 @@ const routes = [
       {
         path: '/list/event-bus',
         component: SimpleEventBus 
+      },
+      {
+        path: '/list/lazy-load',
+        component: LazyLoad 
+      },
+      {
+        path: '/list/badge',
+        component: Badge 
       }
     ]
   },

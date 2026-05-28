@@ -3,11 +3,13 @@ import App from './App.vue'
 import router from './router'
 import vuetify from './plugins/vuetify'
 import AlertPlugin from './plugins/alertPlugin';
+import DirectivesPlugin from './directives';
 
 Vue.config.productionTip = false
 
 // 註冊全域插件
 Vue.use(AlertPlugin);
+Vue.use(DirectivesPlugin);
 
 new Vue({
   router,
