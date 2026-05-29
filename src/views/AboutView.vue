@@ -5,8 +5,9 @@
     <StopEventTestVue></StopEventTestVue>
     <TodoListVue></TodoListVue>
     <UserBadgeVue></UserBadgeVue>
-    <TestVue></TestVue> -->
-    <RwdDemoViewVue></RwdDemoViewVue>
+    
+    <RwdDemoViewVue></RwdDemoViewVue>-->
+<TestVue></TestVue> 
   </div>
 </template>
 <script>
@@ -15,8 +16,8 @@
 // import StopEventTestVue from "@/components/StopEventTest.vue";
 // import TodoListVue from "@/components/TodoList.vue";
 // import UserBadgeVue from "@/components/UserBadge.vue";
-// import TestVue from "@/components/Test.vue";
-import RwdDemoViewVue from "@/components/RWD/RwdDemoView.vue";
+import TestVue from "@/components/Test.vue";
+// import RwdDemoViewVue from "@/components/RWD/RwdDemoView.vue";
 
 export default {
   components: {
@@ -25,8 +26,8 @@ export default {
     // StopEventTestVue,
     // TodoListVue,
     // UserBadgeVue,
-    // TestVue,
-    RwdDemoViewVue
+    TestVue,
+    // RwdDemoViewVue
   },
 };
 </script>
