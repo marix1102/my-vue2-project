@@ -24,8 +24,13 @@ import SimpleEventBus from '@/components/event-bus/SimpleEventBus.vue'
 
 import LazyLoad from '@/components/load/LazyLoad.vue'
 import Badge from '@/components/badge/Badge.vue'
+import NotificationMenu from '@/components/badge/NotificationMenu.vue'
+
 import SimpleVirtualScroller from '@/components/virtual-scroller/SimpleVirtualScroller.vue'
 import LayerCompositionDemo from '@/components/layer-composition/LayerCompositionDemo.vue'
+import TreeviewDemo from '@/components/tree-view/TreeviewDemo.vue'
+import WorkflowStepper from '@/components/step/WorkflowStepper.vue'
+
 
 Vue.use(VueRouter)
 
@@ -115,12 +120,25 @@ const routes = [
         component: Badge 
       },
       {
+        path: '/list/notification',
+        component: NotificationMenu 
+      },
+      {
         path: '/list/virtual-scroller',
         component: SimpleVirtualScroller 
       },
       {
         path: '/list/layer-composition',
         component: LayerCompositionDemo 
+      },
+      {
+        path: '/list/tree-view',
+        component: TreeviewDemo 
+      }
+      ,
+      {
+        path: '/list/step',
+        component: WorkflowStepper 
       }
     ]
   },

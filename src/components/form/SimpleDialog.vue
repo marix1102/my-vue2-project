@@ -40,6 +40,11 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- 畫面上方的成功提示條 -->
+    <v-snackbar v-model="toast" color="success" timeout="2000" top>
+      資料已儲存！姓名：{{username}}
+    </v-snackbar>
   </v-container>
 </template>
 
@@ -50,7 +55,7 @@ export default {
     return {
       // 控制視窗開關的開關（false 代表預設隱藏）
       dialog: false,
-
+      toast: false,
       // 表單資料
       username: "",
       phone: "",
@@ -63,9 +68,9 @@ export default {
       this.phone = "";
     },
     saveData() {
-      alert(`資料已儲存！姓名：${this.username}`);
-
-      this.closeDialog();
+      // alert(`資料已儲存！姓名：${this.username}`);
+      this.toast = true; // 跳出成功提示
+      // this.closeDialog();
     },
   },
 };
