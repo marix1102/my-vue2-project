@@ -46,6 +46,7 @@ export default {
       type: Boolean,
       default: true,
     },
+    viewD005Map:Object
   },
   data() {
     return {
@@ -54,6 +55,7 @@ export default {
   },
   methods: {
     submitOrder() {
+      console.log('viewD005Map',this.viewD005Map)
       const orderDetails = {
         itemName: "熱美式咖啡",
         quantity: 1,

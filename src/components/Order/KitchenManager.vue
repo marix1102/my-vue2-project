@@ -22,6 +22,7 @@
     <OrderCounter
       :storeName="myStoreName"
       :isOpening="isOpen"
+      :view-d005-map="viewD005Map"
       @new-order="handleOrder"
     />
     <!-- </div> -->
@@ -38,6 +39,7 @@ export default {
       myStoreName: "咖啡廳", // 要傳給子組件的店名
       isOpen: true, // 要傳給子組件的營業狀態
       broadcastMessage: "目前沒有新訂單",
+      viewD005Map:{"test":"test123"}
     };
   },
   methods: {

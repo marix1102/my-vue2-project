@@ -1,8 +1,9 @@
 import Vue from 'vue'
 import VueRouter from 'vue-router'
 import HomeView from '../views/HomeView.vue'
-import AboutView from '../views/AboutView.vue'
+// import AboutView from '../views/AboutView.vue'
 import WaferMap from '../views/wafer-map/WaferMap.vue'
+import filecompare from '../views/mxic-test/file-compare.vue'
 
 import KitchenManager from '../components/Order/KitchenManager.vue'
 import ShoppingCart from '../components/ShoppingCart.vue'
@@ -31,6 +32,9 @@ import LayerCompositionDemo from '@/components/layer-composition/LayerCompositio
 import TreeviewDemo from '@/components/tree-view/TreeviewDemo.vue'
 import WorkflowStepper from '@/components/step/WorkflowStepper.vue'
 
+// import FileDiffViewer from '@/components/file-compare/FileDiffViewer.vue'
+import SourceCompare from '@/components/file-compare/SourceCompare.vue'
+
 
 Vue.use(VueRouter)
 
@@ -48,7 +52,7 @@ const routes = [
   {
     path: '/about',
     name: 'about',
-    component: AboutView
+    component: SourceCompare
     // route level code-splitting
     // this generates a separate chunk (about.[hash].js) for this route
     // which is lazy-loaded when the route is visited.
@@ -98,6 +102,14 @@ const routes = [
       {
         path: '/list/wafer-map',
         component: WaferMap 
+      },
+      {
+        path: '/list/mxic-test',
+        component: filecompare 
+      },
+      {
+        path: '/list/file-compare',
+        component: SourceCompare 
       },
       {
         path: '/list/simple-mixin',
